@@ -1,4 +1,4 @@
-# hubee-0.0.2.yml
+# hubee-0.0.1.yml
 # github.com/shenjuexiao
 # 20261017
 
@@ -8,9 +8,10 @@
 #
 # 使用说明：
 # 1. 在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加：
-# - GITEE_USERNAME : Gitee 用户名（可选，默认与 GitHub 同名）
-# - GITEE_TOKEN    : Gitee 私人令牌（必填，需勾选 projects 权限）
-# - GITEE_REPO     : Gitee 目标仓库名（可选，默认与 GitHub 同名；不存在则自动新建）
+# - GITEE_USERNAME  : Gitee 用户名（可选，默认与 GitHub 同名）
+# - GITEE_TOKEN     : Gitee 私人令牌（必填，需勾选 projects 权限）
+# - GITEE_REPO      : Gitee 目标仓库名（可选，默认与 GitHub 同名；不存在则自动新建）
+# - GITEE_PRIVATE   : Gitee 目标仓库私有/公开（可选，默认 true 私有；填 true / false）
 # 2. 触发方式：push 到默认分支、手动触发、定时同步
 
 name: hubee
@@ -24,11 +25,6 @@ on:
   # 支持手动触发
   workflow_dispatch:
 
-# 防止定时任务与 push 同时触发造成并发推送冲突
-concurrency:
-  group: hubee-sync
-  cancel-in-progress: false
-
 jobs:
   sync:
     name: Sync to Gitee
@@ -38,40 +34,44 @@ jobs:
       - name: Checkout GitHub repository
         uses: actions/checkout@v4
         with:
-          # 拉取全部历史与标签，保证镜像完整
+          # 拉取全部历史，保证镜像完整
           fetch-depth: 0
-          fetch-tags: true
 
       - name: Resolve target variables
         id: vars
         run: |
           # Gitee 用户名：优先使用 Secret，否则用 GitHub 仓库所有者
-          # 使用内置环境变量，兼容 push / schedule / workflow_dispatch
           GITEE_USERNAME="${{ secrets.GITEE_USERNAME }}"
           if [ -z "$GITEE_USERNAME" ]; then
-            GITEE_USERNAME="${GITHUB_REPOSITORY_OWNER}"
+            GITEE_USERNAME="${{ github.repository_owner }}"
           fi
 
           # Gitee 仓库名：优先使用 Secret，否则用 GitHub 仓库名
-          # GITHUB_REPOSITORY 形如 owner/repo，去掉 owner/ 即仓库名
           GITEE_REPO="${{ secrets.GITEE_REPO }}"
           if [ -z "$GITEE_REPO" ]; then
-            GITEE_REPO="${GITHUB_REPOSITORY#*/}"
+            GITEE_REPO="${{ github.event.repository.name }}"
           fi
 
-          # 仓库可见性：GitHub 私有 → Gitee 私有，否则公开
-          if [ "${{ github.event.repository.private }}" = "true" ]; then
+          # Gitee 仓库可见性：优先使用 Secret，默认私有（true）
+          GITEE_PRIVATE="${{ secrets.GITEE_PRIVATE }}"
+          if [ -z "$GITEE_PRIVATE" ]; then
             GITEE_PRIVATE="true"
-          else
-            GITEE_PRIVATE="false"
           fi
 
-          {
-            echo "gitee_username=$GITEE_USERNAME"
-            echo "gitee_repo=$GITEE_REPO"
-            echo "gitee_private=$GITEE_PRIVATE"
-          } >> "$GITHUB_OUTPUT"
+          # 归一化，避免 Secret 填了 True/TRUE/1 之类导致 JSON 非法
+          GITEE_PRIVATE="$(echo "$GITEE_PRIVATE" | tr '[:upper:]' '[:lower:]')"
+          case "$GITEE_PRIVATE" in
+            true|1|yes)  GITEE_PRIVATE="true"  ;;
+            false|0|no)  GITEE_PRIVATE="false" ;;
+            *)
+              echo "::warning::GITEE_PRIVATE='$GITEE_PRIVATE' 无法识别，回退为 true"
+              GITEE_PRIVATE="true"
+              ;;
+          esac
 
+          echo "gitee_username=$GITEE_USERNAME" >> "$GITHUB_OUTPUT"
+          echo "gitee_repo=$GITEE_REPO"         >> "$GITHUB_OUTPUT"
+          echo "gitee_private=$GITEE_PRIVATE"   >> "$GITHUB_OUTPUT"
           echo "::notice::将同步到 Gitee: $GITEE_USERNAME/$GITEE_REPO (private=$GITEE_PRIVATE)"
 
       - name: Ensure Gitee repository exists
@@ -152,6 +152,3 @@ jobs:
             "refs/tags/*:refs/tags/*"
 
           echo "::notice::已成功同步到 https://gitee.com/${GITEE_USERNAME}/${GITEE_REPO}"
-
-          # 推送完成后移除含 token 的 remote，避免泄露
-          git remote remove gitee || true
