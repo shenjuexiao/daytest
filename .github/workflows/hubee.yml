@@ -1,7 +1,24 @@
 # hubee.yml
+# github.com/shenjuexiao
+# 20261018
+
+# .github/workflows/hubee.yml
 # GitHub 仓库自动推送 Gitee 仓库的工作流
-# 适用不同用户名、不同仓库、私有库或公开库
-# 支持：GitHub 个人/组织 → Gitee 个人/组织
+# 适用不同用户名、不同仓库、仓库私有或开源
+#
+# 使用说明：
+# 个人仓库（GitHub 个人）：
+#   GITEE_USERNAME - Gitee 用户名，默认 GitHub 同名（Gitee 个人或组织均可）
+#   GITEE_TOKEN    - Gitee 私人令牌，必填，勾选 projects 权限
+#   GITEE_REPO     - Gitee 目标仓库，默认 GitHub 同名，不存在则新建
+#   GITEE_PRIVATE  - 个人仓库固定 true（私有），不能设置
+# 组织仓库（GitHub 组织）：
+#   GITEE_ORG      - Gitee 组织名，默认 GitHub 同名（Gitee 个人或组织均可）
+#   GITEE_TOKEN    - Gitee 私人令牌，必填，勾选 projects 权限
+#   GITEE_REPO     - Gitee 目标仓库，默认 GitHub 同名，不存在则新建
+#   GITEE_PRIVATE  - Gitee 仓库开源(false)/私有(true)，默认与 GitHub 仓库相同
+#
+# 推送统一使用 oauth2 作为固定用户名
 
 name: hubee
 
@@ -9,7 +26,8 @@ on:
   push:
     branches: [main, master]
   schedule:
-    - cron: '0 2 * * *'   # 每天 UTC 02:00（北京时间 10:00）
+    # 每天 UTC 02:00（北京时间 10:00）自动同步
+    - cron: '0 2 * * *'
   workflow_dispatch:
 
 jobs:
@@ -26,46 +44,51 @@ jobs:
       - name: Resolve target variables
         id: vars
         run: |
-          # ---------- GitHub 仓库归属 ----------
-          GH_OWNER="${{ github.repository_owner }}"
-          GH_OWNER_TYPE="${{ github.event.repository.owner.type }}"   # User / Organization
-          GH_REPO="${{ github.event.repository.name }}"
-          GH_PRIVATE="${{ github.event.repository.private }}"        # true / false
+          # 判断 GitHub 仓库归属类型：User / Organization
+          OWNER_TYPE="${{ github.event.repository.owner.type }}"
+          echo "::notice::GitHub 仓库归属类型: $OWNER_TYPE"
 
-          # ---------- Gitee 仓库名 ----------
-          GITEE_REPO="${{ secrets.GITEE_REPO }}"
-          if [ -z "$GITEE_REPO" ]; then
-            GITEE_REPO="$GH_REPO"
-          fi
+          # GitHub 仓库可见性 → 用于组织仓库的默认 private 值
+          GH_PRIVATE="${{ github.event.repository.private }}"
 
-          # ---------- 目标类型：组织 or 个人 ----------
-          # 显式设置 GITEE_ORG 或 GitHub 仓库属于组织 → 组织路径
-          GITEE_ORG="${{ secrets.GITEE_ORG }}"
-          if [ -n "$GITEE_ORG" ] || [ "$GH_OWNER_TYPE" = "Organization" ]; then
-            TARGET_TYPE="org"
+          if [ "$OWNER_TYPE" = "Organization" ]; then
+            # ===== 组织仓库 =====
+            # Gitee 组织名：优先 GITEE_ORG，否则 GITEE_USERNAME，再否则 GitHub 同名
+            GITEE_ORG="${{ secrets.GITEE_ORG }}"
             if [ -z "$GITEE_ORG" ]; then
-              GITEE_ORG="$GH_OWNER"   # 默认与 GitHub 组织同名
+              GITEE_ORG="${{ secrets.GITEE_USERNAME }}"
+            fi
+            if [ -z "$GITEE_ORG" ]; then
+              GITEE_ORG="${{ github.repository_owner }}"
             fi
             TARGET_OWNER="$GITEE_ORG"
+            SCOPE="org"
+
+            # private 默认与 GitHub 一致
+            GITEE_PRIVATE="${{ secrets.GITEE_PRIVATE }}"
+            if [ -z "$GITEE_PRIVATE" ]; then
+              GITEE_PRIVATE="$GH_PRIVATE"
+            fi
           else
-            TARGET_TYPE="user"
+            # ===== 个人仓库 =====
             GITEE_USERNAME="${{ secrets.GITEE_USERNAME }}"
             if [ -z "$GITEE_USERNAME" ]; then
-              GITEE_USERNAME="$GH_OWNER"   # 默认与 GitHub 同名
+              GITEE_USERNAME="${{ github.repository_owner }}"
             fi
             TARGET_OWNER="$GITEE_USERNAME"
+            SCOPE="user"
+
+            # 个人仓库固定私有
+            GITEE_PRIVATE="true"
           fi
 
-          # ---------- 可见性 ----------
-          GITEE_PRIVATE="${{ secrets.GITEE_PRIVATE }}"
-          if [ -z "$GITEE_PRIVATE" ]; then
-            if [ "$TARGET_TYPE" = "org" ]; then
-              GITEE_PRIVATE="$GH_PRIVATE"   # 组织：与 GitHub 一致
-            else
-              GITEE_PRIVATE="true"          # 个人：默认私有
-            fi
+          # Gitee 仓库名：优先 Secret，否则 GitHub 仓库名
+          GITEE_REPO="${{ secrets.GITEE_REPO }}"
+          if [ -z "$GITEE_REPO" ]; then
+            GITEE_REPO="${{ github.event.repository.name }}"
           fi
-          # 归一化
+
+          # 归一化 private
           GITEE_PRIVATE="$(echo "$GITEE_PRIVATE" | tr '[:upper:]' '[:lower:]')"
           case "$GITEE_PRIVATE" in
             true|1|yes)  GITEE_PRIVATE="true"  ;;
@@ -76,24 +99,20 @@ jobs:
               ;;
           esac
 
-          echo "target_type=$TARGET_TYPE"       >> "$GITHUB_OUTPUT"
-          echo "target_owner=$TARGET_OWNER"     >> "$GITHUB_OUTPUT"
-          echo "gitee_org=$GITEE_ORG"           >> "$GITHUB_OUTPUT"
-          echo "gitee_username=$GITEE_USERNAME" >> "$GITHUB_OUTPUT"
-          echo "gitee_repo=$GITEE_REPO"         >> "$GITHUB_OUTPUT"
-          echo "gitee_private=$GITEE_PRIVATE"   >> "$GITHUB_OUTPUT"
-          echo "::notice::目标类型=$TARGET_TYPE, 目标=${TARGET_OWNER}/${GITEE_REPO}, private=$GITEE_PRIVATE"
+          echo "scope=$SCOPE"                 >> "$GITHUB_OUTPUT"
+          echo "target_owner=$TARGET_OWNER"   >> "$GITHUB_OUTPUT"
+          echo "gitee_repo=$GITEE_REPO"       >> "$GITHUB_OUTPUT"
+          echo "gitee_private=$GITEE_PRIVATE" >> "$GITHUB_OUTPUT"
+          echo "::notice::将同步到 Gitee($SCOPE): ${TARGET_OWNER}/${GITEE_REPO} (private=$GITEE_PRIVATE)"
 
       - name: Ensure Gitee repository exists
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
-          TARGET_TYPE="${{ steps.vars.outputs.target_type }}"
+          SCOPE="${{ steps.vars.outputs.scope }}"
           TARGET_OWNER="${{ steps.vars.outputs.target_owner }}"
           GITEE_REPO="${{ steps.vars.outputs.gitee_repo }}"
           GITEE_PRIVATE="${{ steps.vars.outputs.gitee_private }}"
-          GITEE_USERNAME="${{ steps.vars.outputs.gitee_username }}"
-          GITEE_ORG="${{ steps.vars.outputs.gitee_org }}"
 
           if [ -z "$GITEE_TOKEN" ]; then
             echo "::error::缺少 GITEE_TOKEN，请在仓库 Secrets 中配置"
@@ -103,54 +122,44 @@ jobs:
           API="https://gitee.com/api/v5"
           REPO_API="${API}/repos/${TARGET_OWNER}/${GITEE_REPO}"
 
+          # 查询仓库是否存在
           HTTP_CODE=$(curl -s -o /tmp/repo.json -w "%{http_code}" \
             "${REPO_API}?access_token=${GITEE_TOKEN}")
 
           if [ "$HTTP_CODE" = "200" ]; then
             echo "::notice::Gitee 仓库已存在：${TARGET_OWNER}/${GITEE_REPO}"
-            exit 0
           elif [ "$HTTP_CODE" = "404" ]; then
             echo "::notice::Gitee 仓库不存在，正在创建：${TARGET_OWNER}/${GITEE_REPO}"
+
+            # 组织仓库用 /orgs/{org}/repos，个人仓库用 /user/repos
+            if [ "$SCOPE" = "org" ]; then
+              CREATE_URL="${API}/orgs/${TARGET_OWNER}/repos"
+            else
+              CREATE_URL="${API}/user/repos"
+            fi
+
+            CREATE_CODE=$(curl -s -o /tmp/create.json -w "%{http_code}" \
+              -X POST "${CREATE_URL}" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"access_token\": \"${GITEE_TOKEN}\",
+                \"name\": \"${GITEE_REPO}\",
+                \"private\": ${GITEE_PRIVATE},
+                \"auto_init\": false,
+                \"has_issues\": true,
+                \"has_wiki\": false
+              }")
+
+            if [ "$CREATE_CODE" = "201" ] || [ "$CREATE_CODE" = "200" ]; then
+              echo "::notice::Gitee 仓库创建成功"
+            else
+              echo "::error::创建 Gitee 仓库失败（HTTP ${CREATE_CODE}）"
+              cat /tmp/create.json
+              exit 1
+            fi
           else
             echo "::error::查询 Gitee 仓库失败（HTTP ${HTTP_CODE}）"
             cat /tmp/repo.json
-            exit 1
-          fi
-
-          # 构造创建请求
-          if [ "$TARGET_TYPE" = "org" ]; then
-            # 推到 Gitee 组织：需要组织名
-            if [ -z "$GITEE_ORG" ]; then
-              echo "::error::推送到 Gitee 组织但未提供 GITEE_ORG"
-              exit 1
-            fi
-            CREATE_URL="${API}/orgs/${GITEE_ORG}/repos"
-          else
-            # 推到 Gitee 个人：token 所有者本人
-            if [ -z "$GITEE_USERNAME" ]; then
-              echo "::error::推送到 Gitee 个人但未提供 GITEE_USERNAME"
-              exit 1
-            fi
-            CREATE_URL="${API}/user/repos"
-          fi
-
-          CREATE_CODE=$(curl -s -o /tmp/create.json -w "%{http_code}" \
-            -X POST "$CREATE_URL" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"access_token\": \"${GITEE_TOKEN}\",
-              \"name\": \"${GITEE_REPO}\",
-              \"private\": ${GITEE_PRIVATE},
-              \"auto_init\": false,
-              \"has_issues\": true,
-              \"has_wiki\": false
-            }")
-
-          if [ "$CREATE_CODE" = "201" ] || [ "$CREATE_CODE" = "200" ]; then
-            echo "::notice::Gitee 仓库创建成功"
-          else
-            echo "::error::创建 Gitee 仓库失败（HTTP ${CREATE_CODE}）"
-            cat /tmp/create.json
             exit 1
           fi
 
@@ -161,10 +170,12 @@ jobs:
           TARGET_OWNER="${{ steps.vars.outputs.target_owner }}"
           GITEE_REPO="${{ steps.vars.outputs.gitee_repo }}"
 
+          # 配置 Git 身份
           git config --global user.name  "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 用户名：组织路径下用组织名，个人路径下用个人名
+          # 统一使用 oauth2 作为固定用户名，token 作为密码
+          # 兼容个人/组织、公开/私有仓库
           REMOTE_URL="https://oauth2:${GITEE_TOKEN}@gitee.com/${TARGET_OWNER}/${GITEE_REPO}.git"
 
           if git remote | grep -qx gitee; then
@@ -173,6 +184,7 @@ jobs:
             git remote add gitee "$REMOTE_URL"
           fi
 
+          # 镜像推送所有分支与标签
           git push --prune --force gitee \
             "refs/remotes/origin/*:refs/heads/*" \
             "refs/tags/*:refs/tags/*"
