@@ -165,7 +165,7 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           # 用户名：组织路径下用组织名，个人路径下用个人名
-          REMOTE_URL="https://${TARGET_OWNER}:${GITEE_TOKEN}@gitee.com/${TARGET_OWNER}/${GITEE_REPO}.git"
+          REMOTE_URL="https://oauth2:${GITEE_TOKEN}@gitee.com/${TARGET_OWNER}/${GITEE_REPO}.git"
 
           if git remote | grep -qx gitee; then
             git remote set-url gitee "$REMOTE_URL"
