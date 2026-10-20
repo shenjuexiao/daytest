@@ -1,0 +1,40 @@
+# sync-to-gitee-1.0.1.yml
+# github.com/shenjuexiao
+# 20261020
+
+# .github/workflows/sync-to-gitee.yml
+#
+# 1. 新建 Gitee 私人令牌
+# `账号设置` -> `私人令牌`-> [`GITEE_TOKEN`]
+# 2. 新建 GitHub 仓库 Repository Secrets
+# `Settings` -> `Secrets and variables` -> `Actions` -> `Repository secrets` -> `Repository secrets`
+# 3. 将 [`examples/workflow.yml`](examples/workflow.yml) （重命名）复制到 `.github/workflows/`
+# 或者将相应代码复制到原有的 `*.yml` 的 `steps: `内
+#
+name: Sync to Gitee
+
+on:
+  push:
+    branches: [main, master]
+  # schedule:
+    # 每天 UTC 02:00（北京时间 10:00）
+    # - cron: '0 2 * * *'   
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: hubee-action
+        uses: shenjuexiao/hubee-action@v1
+        with:
+          gitee_token:    ${{ secrets.GITEE_TOKEN }}
+          gitee_org:      ${{ secrets.GITEE_ORG }}
+          gitee_username: ${{ secrets.GITEE_USERNAME }}
+          gitee_repo:     ${{ secrets.GITEE_REPO }}
+          gitee_private:  ${{ secrets.GITEE_PRIVATE }}
